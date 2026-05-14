@@ -1,0 +1,6 @@
+flask
+flask-caching
+pycryptodome
+requests
+pyjwt
+protobuf
