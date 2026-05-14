@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>FF Outfit Viewer | API</title>
+    <!-- TailwindCSS + Font Awesome + Google Fonts -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+        body { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); min-height: 100vh; }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.07);
+            backdrop-filter: blur(12px);
+            border-radius: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.2s ease;
+        }
+        .item-badge {
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            border-radius: 1rem;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .item-badge:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 20px -12px rgba(0,0,0,0.4);
+        }
+        .image-placeholder {
+            background: linear-gradient(145deg, #2d3a5e, #1e2a44);
+            width: 70px;
+            height: 70px;
+            border-radius: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            box-shadow: inset 0 1px 2px rgba(255,255,255,0.1), 0 6px 12px -6px black;
+        }
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        .loader {
+            border: 3px solid rgba(255,255,255,0.2);
+            border-top: 3px solid #facc15;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        input, select {
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid #334155;
+            transition: all 0.2s;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #facc15;
+            box-shadow: 0 0 0 2px rgba(250,204,21,0.3);
+        }
+        button.primary {
+            background: linear-gradient(95deg, #facc15, #f59e0b);
+            transition: 0.2s;
+        }
+        button.primary:hover {
+            transform: scale(0.98);
+            filter: brightness(1.05);
+        }
+    </style>
+</head>
+<body class="text-white">
+
+<div id="root"></div>
+
+<!-- React + ReactDOM + Babel -->
+<script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.development.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.development.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel">
+    // ------------------- MOCK AUTH SYSTEM (localStorage) -------------------
+    const STORAGE_USERS = "ff_outfit_users";
+    const STORAGE_SESSION = "ff_outfit_session";
+
+    // Helper: get registered users
+    const getUsers = () => {
+        const raw = localStorage.getItem(STORAGE_USERS);
+        if (!raw) return {};
+        return JSON.parse(raw);
+    };
+
+    const saveUsers = (users) => {
+        localStorage.setItem(STORAGE_USERS, JSON.stringify(users));
+    };
+
+    const registerUser = (username, password) => {
+        const users = getUsers();
+        if (users[username]) return { success: false, error: "Username already exists" };
+        if (!username.trim() || !password.trim()) return { success: false, error: "Username/password required" };
+        users[username] = { password: password, createdAt: Date.now() };
+        saveUsers(users);
+        return { success: true };
+    };
+
+    const loginUser = (username, password) => {
+        const users = getUsers();
+        const user = users[username];
+        if (!user || user.password !== password) return { success: false, error: "Invalid credentials" };
+        // store session
+        localStorage.setItem(STORAGE_SESSION, JSON.stringify({ username, loggedInAt: Date.now() }));
+        return { success: true, username };
+    };
+
+    const logoutUser = () => {
+        localStorage.removeItem(STORAGE_SESSION);
+    };
+
+    const getCurrentSession = () => {
+        const raw = localStorage.getItem(STORAGE_SESSION);
+        if (!raw) return null;
+        try {
+            return JSON.parse(raw);
+        } catch(e) { return null; }
+    };
+
+    // ------------------- MAIN APP -------------------
+    const App = () => {
+        const [session, setSession] = React.useState(getCurrentSession());
+        const [authView, setAuthView] = React.useState("login"); // "login" or "register"
+        const [authUsername, setAuthUsername] = React.useState("");
+        const [authPassword, setAuthPassword] = React.useState("");
+        const [authError, setAuthError] = React.useState("");
+        const [authSuccess, setAuthSuccess] = React.useState("");
+
+        // Outfit Dashboard state (visible only when logged in)
+        const [uid, setUid] = React.useState("");
+        const [region, setRegion] = React.useState("IND");
+        const [loading, setLoading] = React.useState(false);
+        const [outfitData, setOutfitData] = React.useState(null);
+        const [apiError, setApiError] = React.useState("");
+
+        // handle login action
+        const handleLogin = () => {
+            setAuthError("");
+            setAuthSuccess("");
+            const res = loginUser(authUsername, authPassword);
+            if (res.success) {
+                setSession(getCurrentSession());
+                setAuthUsername("");
+                setAuthPassword("");
+                setAuthSuccess("Logged in successfully!");
+                setTimeout(() => setAuthSuccess(""), 2000);
+            } else {
+                setAuthError(res.error);
+            }
+        };
+
+        const handleRegister = () => {
+            setAuthError("");
+            setAuthSuccess("");
+            const res = registerUser(authUsername, authPassword);
+            if (res.success) {
+                setAuthSuccess("Account created! Please login.");
+                setAuthView("login");
+                setAuthUsername("");
+                setAuthPassword("");
+            } else {
+                setAuthError(res.error);
+            }
+        };
+
+        const handleLogout = () => {
+            logoutUser();
+            setSession(null);
+            setOutfitData(null);
+            setApiError("");
+            setUid("");
+        };
+
+        // fetch outfit from backend API (relative path /outfit)
+        const fetchOutfit = async () => {
+            if (!uid || uid.trim() === "") {
+                setApiError("❌ Please enter a valid UID");
+                return;
+            }
+            if (!region) {
+                setApiError("❌ Please select region");
+                return;
+            }
+            setLoading(true);
+            setApiError("");
+            setOutfitData(null);
+            try {
+                const params = new URLSearchParams({
+                    uid: uid.trim(),
+                    region: region
+                });
+                const response = await fetch(`/outfit?${params.toString()}`, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
+                if (!response.ok) {
+                    let errMsg = `HTTP ${response.status}`;
+                    try {
+                        const errJson = await response.json();
+                        errMsg = errJson.error || errMsg;
+                    } catch(e) {}
+                    throw new Error(errMsg);
+                }
+                const data = await response.json();
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                setOutfitData(data);
+            } catch (err) {
+                console.error("Fetch error:", err);
+                setApiError(`⚠️ Failed to fetch outfit: ${err.message}`);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        // Reset dashboard when region/uid changed (optional)
+        // but we keep data until new fetch
+
+        if (!session) {
+            // AUTHENTICATION PAGE (Login / Register)
+            return (
+                <div className="min-h-screen flex items-center justify-center p-5">
+                    <div className="glass-card w-full max-w-md p-8 shadow-2xl">
+                        <div className="text-center mb-6">
+                            <i className="fas fa-skull text-5xl text-yellow-400 mb-2"></i>
+                            <h1 className="text-3xl font-bold bg-gradient-to-r from-yellow-300 to-orange-400 bg-clip-text text-transparent">FF OUTIFIT VIEWER</h1>
+                            <p className="text-gray-300 text-sm mt-1">Powered by Danger API • Auto FF updater</p>
+                        </div>
+
+                        {/* Tab Buttons */}
+                        <div className="flex gap-3 mb-6 bg-black/30 p-1 rounded-xl">
+                            <button 
+                                onClick={() => { setAuthView("login"); setAuthError(""); setAuthSuccess(""); }}
+                                className={`flex-1 py-2 rounded-lg font-semibold transition ${authView === "login" ? "bg-yellow-500 text-black" : "text-gray-300 hover:text-white"}`}
+                            ><i className="fas fa-sign-in-alt mr-2"></i>Login</button>
+                            <button 
+                                onClick={() => { setAuthView("register"); setAuthError(""); setAuthSuccess(""); }}
+                                className={`flex-1 py-2 rounded-lg font-semibold transition ${authView === "register" ? "bg-yellow-500 text-black" : "text-gray-300 hover:text-white"}`}
+                            ><i className="fas fa-user-plus mr-2"></i>Register</button>
+                        </div>
+
+                        {/* Forms */}
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-300 mb-1">Username</label>
+                                <input 
+                                    type="text" value={authUsername} onChange={(e) => setAuthUsername(e.target.value)}
+                                    className="w-full px-4 py-3 rounded-xl text-white" placeholder="Enter username"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-300 mb-1">Password</label>
+                                <input 
+                                    type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)}
+                                    className="w-full px-4 py-3 rounded-xl text-white" placeholder="••••••••"
+                                    onKeyDown={(e) => { if(e.key === 'Enter') authView === "login" ? handleLogin() : handleRegister(); }}
+                                />
+                            </div>
+
+                            {authError && <div className="bg-red-500/20 border border-red-500 rounded-xl p-2 text-sm text-red-200 text-center">{authError}</div>}
+                            {authSuccess && <div className="bg-green-500/20 border border-green-500 rounded-xl p-2 text-sm text-green-200 text-center">{authSuccess}</div>}
+
+                            {authView === "login" ? (
+                                <button onClick={handleLogin} className="primary w-full py-3 rounded-xl font-bold text-black text-lg shadow-lg">Login →</button>
+                            ) : (
+                                <button onClick={handleRegister} className="primary w-full py-3 rounded-xl font-bold text-black text-lg shadow-lg">Create account</button>
+                            )}
+                        </div>
+
+                        <div className="text-center text-xs text-gray-400 mt-8 pt-4 border-t border-white/10">
+                            <i className="fas fa-shield-alt"></i> demo auth • outfit data via official endpoint<br/>
+                            <span className="text-yellow-300">credits: @NoTLegenD , @Aadityakc</span>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --------------------------------- DASHBOARD (Logged in) ---------------------------------
+        return (
+            <div className="max-w-7xl mx-auto px-4 py-6 md:py-8">
+                {/* Header with logout */}
+                <div className="flex justify-between items-center mb-6 flex-wrap gap-3">
+                    <div className="flex items-center gap-3">
+                        <i className="fas fa-fire text-3xl text-orange-500"></i>
+                        <div>
+                            <h1 className="text-2xl md:text-3xl font-bold">🔥 Outfit Inspector</h1>
+                            <p className="text-gray-300 text-sm">Welcome, <span className="text-yellow-300 font-semibold">{session.username}</span> • Auto version sync for all regions</p>
+                        </div>
+                    </div>
+                    <button onClick={handleLogout} className="bg-red-500/80 hover:bg-red-600 px-5 py-2 rounded-full flex items-center gap-2 transition"><i className="fas fa-sign-out-alt"></i> Logout</button>
+                </div>
+
+                {/* API Control Panel */}
+                <div className="glass-card p-6 mb-8">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-end">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-300 mb-1"><i className="fas fa-id-card mr-1"></i> Player UID</label>
+                            <input 
+                                type="number" value={uid} onChange={(e) => setUid(e.target.value)}
+                                className="w-full px-4 py-3 rounded-xl text-white" placeholder="e.g., 4765721896"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-300 mb-1"><i className="fas fa-globe-americas mr-1"></i> Region / Server</label>
+                            <select value={region} onChange={(e) => setRegion(e.target.value)} className="w-full px-4 py-3 rounded-xl text-white">
+                                <option value="IND">🇮🇳 INDIA (IND)</option>
+                                <option value="AMERICA">🌎 AMERICA (BR/US/NA/SAC)</option>
+                                <option value="OTHERS">🌍 OTHER REGIONS (EU/SEA/etc)</option>
+                            </select>
+                            <p className="text-xs text-gray-400 mt-1">* Auto maps to backend JWT & version config</p>
+                        </div>
+                        <div>
+                            <button onClick={fetchOutfit} disabled={loading} className={`primary w-full py-3 rounded-xl font-bold text-black text-lg shadow-md flex items-center justify-center gap-2 ${loading ? 'opacity-70 cursor-wait' : ''}`}>
+                                {loading ? <div className="loader w-5 h-5 border-2 border-black border-t-transparent"></div> : <i className="fas fa-robot"></i>}
+                                {loading ? "FETCHING..." : "INITIALIZE → GET OUTFIT"}
+                            </button>
+                        </div>
+                    </div>
+                    {apiError && <div className="mt-4 bg-red-500/20 border-l-4 border-red-500 p-3 rounded-xl text-red-200 text-sm"><i className="fas fa-exclamation-triangle mr-2"></i>{apiError}</div>}
+                </div>
+
+                {/* Results Section */}
+                {outfitData && (
+                    <div className="space-y-8 animate-fade-in">
+                        {/* Character & Basic Info */}
+                        <div className="glass-card p-6">
+                            <h2 className="text-xl font-bold border-l-4 border-yellow-400 pl-3 mb-5"><i className="fas fa-user-astronaut mr-2"></i> Character Profile</h2>
+                            <div className="flex flex-wrap items-start gap-6">
+                                <div className="image-placeholder w-28 h-28 text-5xl bg-gradient-to-br from-amber-600 to-orange-700 shadow-xl">
+                                    <i className="fas fa-mask"></i>
+                                </div>
+                                <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div><span className="text-gray-400 text-sm">CHARACTER ID</span><div className="text-2xl font-mono font-bold">{outfitData.ProfileInfo?.CharacterId ?? "—"}</div></div>
+                                    <div><span className="text-gray-400 text-sm">SKIN COLOR</span><div className="text-xl font-semibold">{outfitData.ProfileInfo?.SkinColor ?? "—"} <span className="text-xs text-gray-400">(palette)</span></div></div>
+                                    <div><span className="text-gray-400 text-sm">AWAKEN STATUS</span><div className="flex gap-3 mt-1">
+                                        {outfitData.ProfileInfo?.IsSelected !== null && <span className={`px-3 py-1 rounded-full text-xs font-bold ${outfitData.ProfileInfo.IsSelected ? 'bg-green-500/30 text-green-300' : 'bg-gray-600/40'}`}>⚡ Selected {outfitData.ProfileInfo.IsSelected ? "✓" : "✗"}</span>}
+                                        {outfitData.ProfileInfo?.IsAwakenSelected !== null && <span className={`px-3 py-1 rounded-full text-xs font-bold ${outfitData.ProfileInfo.IsAwakenSelected ? 'bg-purple-500/30 text-purple-300' : 'bg-gray-600/40'}`}>🌀 Awaken {outfitData.ProfileInfo.IsAwakenSelected ? "ON" : "OFF"}</span>}
+                                    </div></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* CLOTHES (with images / icons) */}
+                        <div className="glass-card p-6">
+                            <h2 className="text-xl font-bold border-l-4 border-pink-400 pl-3 mb-4"><i className="fas fa-tshirt mr-2"></i> Equipped Clothes ({outfitData.ProfileInfo?.Clothes?.length || 0})</h2>
+                            {outfitData.ProfileInfo?.Clothes?.length ? (
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                                    {outfitData.ProfileInfo.Clothes.map((clothId, idx) => (
+                                        <div key={idx} className="item-badge p-3 text-center bg-black/40 rounded-2xl">
+                                            <div className="image-placeholder w-full h-20 mx-auto mb-2 bg-gradient-to-br from-slate-700 to-slate-800">
+                                                <i className="fas fa-shirt text-3xl text-cyan-300"></i>
+                                            </div>
+                                            <div className="font-mono text-xs bg-black/60 py-1 px-2 rounded-full inline-block">{clothId}</div>
+                                            <p className="text-[11px] text-gray-300 mt-1">Clothing item</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : <div className="text-center py-6 text-gray-400"><i className="fas fa-ban"></i> No clothes data</div>}
+                        </div>
+
+                        {/* WEAPON SKINS */}
+                        <div className="glass-card p-6">
+                            <h2 className="text-xl font-bold border-l-4 border-green-400 pl-3 mb-4"><i className="fas fa-gun mr-2"></i> Weapon Skin Shows ({outfitData.WeaponSkinShows?.length || 0})</h2>
+                            {outfitData.WeaponSkinShows?.length ? (
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                                    {outfitData.WeaponSkinShows.map((weaponId, idx) => (
+                                        <div key={idx} className="item-badge p-3 text-center bg-black/40 rounded-2xl">
+                                            <div className="image-placeholder w-full h-20 mx-auto mb-2 bg-gradient-to-br from-emerald-800 to-teal-900">
+                                                <i className="fas fa-crosshairs text-3xl text-emerald-300"></i>
+                                            </div>
+                                            <div className="font-mono text-xs bg-black/60 py-1 px-2 rounded-full">{weaponId}</div>
+                                            <p className="text-[11px] text-gray-300 mt-1">Weapon skin</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : <div className="text-center py-6 text-gray-400"><i className="fas fa-gun-slash"></i> No weapon skins equipped</div>}
+                        </div>
+
+                        {/* SKILLS (1 to 3 + extra) */}
+                        <div className="glass-card p-6">
+                            <h2 className="text-xl font-bold border-l-4 border-blue-400 pl-3 mb-4"><i className="fas fa-brain mr-2"></i> Active Skills & Passives</h2>
+                            {outfitData.ProfileInfo?.Skills?.length ? (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                                    {outfitData.ProfileInfo.Skills.map((skill, idx) => (
+                                        <div key={idx} className="bg-slate-800/50 rounded-2xl p-4 border border-white/10 flex flex-col items-start gap-2">
+                                            <div className="flex items-center gap-3 w-full">
+                                                <div className="image-placeholder w-12 h-12 !rounded-xl bg-indigo-900/60">
+                                                    <i className="fas fa-star-of-life text-indigo-300 text-xl"></i>
+                                                </div>
+                                                <div>
+                                                    <div className="font-mono font-bold text-base">ID: {skill.SkillId}</div>
+                                                    {skill.SlotNo !== undefined && <div className="text-xs bg-yellow-500/30 text-yellow-200 px-2 py-0.5 rounded-full inline-block mt-1">Slot #{skill.SlotNo}</div>}
+                                                    {skill.SlotNo === undefined && <div className="text-xs text-gray-400">Core skill</div>}
+                                                </div>
+                                            </div>
+                                            <div className="text-xs text-gray-300 mt-1 w-full"><i className="fas fa-bolt mr-1"></i> Skill index {idx+1}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : <div className="text-center py-6 text-gray-400"><i className="fas fa-dizzy"></i> No skills data</div>}
+                            {outfitData.ProfileInfo?.Skills?.length === 0 && <div className="text-gray-500 text-center">— no active skills —</div>}
+                        </div>
+
+                        {/* extra info: timestamp / credit */}
+                        <div className="text-center text-gray-400 text-xs flex flex-wrap justify-between items-center border-t border-white/10 pt-6">
+                            <div><i className="fab fa-telegram mr-1"></i> t.me/danger_ff_dev • API auto version (FF updater)</div>
+                            <div><span className="text-yellow-400">credits: @NoTLegenD , @Aadityakc</span> • visual representation with icons & IDs</div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Empty state when no data fetched yet */}
+                {!outfitData && !loading && !apiError && (
+                    <div className="glass-card p-12 text-center border-dashed border-2 border-gray-600">
+                        <i className="fas fa-search text-6xl text-gray-500 mb-3"></i>
+                        <p className="text-gray-300">Enter UID & region, then click "INITIALIZE" to fetch outfit data.<br/>Displays character, clothes, weapon skins, skills with images.</p>
+                        <p className="text-xs text-gray-400 mt-4">✨ Supports all regions (IND/AMERICA/OTHERS) with dynamic version updater integrated</p>
+                    </div>
+                )}
+                {loading && (
+                    <div className="glass-card p-12 text-center">
+                        <div className="loader mx-auto"></div>
+                        <p className="mt-4 text-yellow-300">Fetching live outfit from Garena servers ...</p>
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+flask
+flask-caching
+pycryptodome
+requests
+pyjwt
+protobuf
+danger-ff-version-updater==7.7.7.7
